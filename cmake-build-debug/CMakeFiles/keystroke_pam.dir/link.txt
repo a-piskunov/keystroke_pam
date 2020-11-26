@@ -1,0 +1,1 @@
+/usr/bin/cc -g   CMakeFiles/keystroke_pam.dir/keystroke_pam.c.o CMakeFiles/keystroke_pam.dir/binary_helper.c.o  -o keystroke_pam 
