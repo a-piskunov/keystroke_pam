@@ -15,6 +15,8 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <poll.h>
+#include <stdbool.h>
+#include <time.h>
 
 #include <security/_pam_types.h>
 #include <security/_pam_macros.h>
@@ -86,7 +88,24 @@ static const char *const evval[3] = {
         "REPEATED"
 };
 
+char *
+getuidname(uid_t uid)
+{
+    struct passwd *pw;
+    static char username[256];
+
+    pw = getpwuid(uid);
+    if (pw == NULL)
+        return NULL;
+
+    strncpy(username, pw->pw_name, sizeof(username));
+    username[sizeof(username) - 1] = '\0';
+
+    return username;
+}
+
 #define KEYBOARD_FILE "/dev/input/event3"
+#define KEYSTROKE_FILE "/home/alexey/Documents/keystroke-pam"
 
 int main(int argc, char *argv[])
 {
@@ -97,57 +116,72 @@ int main(int argc, char *argv[])
     int retval = PAM_AUTH_ERR;
     char *user;
     char *passwords[] = { pass };
-    const char *dev = KEYBOARD_FILE;
-    struct input_event ev;
+//    const char *dev = KEYBOARD_FILE;
+    struct input_event ev[64];
     ssize_t n;
     int fd;
 
-    fd = open(dev, O_RDONLY);
-    if (fd == -1) {
-        fprintf(stderr, "Cannot open %s: %s.\n", dev, strerror(errno));
-        return EXIT_FAILURE;
+    /*
+	 * Determine what the current user's name is.
+	 * We must thus skip the check if the real uid is 0.
+	 */
+    if (getuid() == 0) {
+        user=argv[1];
+    }
+    else {
+        user = getuidname(getuid());
+        /* if the caller specifies the username, verify that user
+           matches it */
+        if (user == NULL || strcmp(user, argv[1])) {
+            user = argv[1];
+            /* no match -> permanently change to the real user and proceed */
+            if (setuid(getuid()) != 0)
+                return PAM_AUTH_ERR;
+        }
     }
 
+    fd = open(KEYBOARD_FILE, O_RDONLY);
+    if (fd == -1) {
+        syslog(LOG_WARNING, "Cannot open %s: %s.\n", KEYBOARD_FILE, strerror(errno));
+        return PAM_SYSTEM_ERR;
+    }
+
+    /* report to pam */
+    char *helper_message = "start!";
+    int len = strlen(helper_message);
+    if (write(STDOUT_FILENO, helper_message, len) == -1) {
+        syslog(LOG_DEBUG, "helper: cannot send message from helper");
+        retval = PAM_AUTH_ERR;
+    }
     struct pollfd stdin_poll = { .fd = STDIN_FILENO
             , .events = POLLIN | POLLRDBAND | POLLRDNORM | POLLPRI };
 
     int fd_write;
-    char *name = "/home/alexey/Downloads/my_pam/helloworld";
+    time_t rawtime;
+    time (&rawtime);
+    char name[80];
+    sprintf(name,"/home/alexey/Documents/keystroke-pam/data/%s",ctime(&rawtime) );
+    char *p = name;
+    for (; *p; ++p)
+    {
+        if (*p == ' ')
+            *p = '_';
+    }
     syslog(LOG_WARNING, "support: try to open file");
     fd_write = open(name, O_WRONLY | O_CREAT, 0644);
     syslog(LOG_WARNING, "support: file opened");
     if (fd_write == -1) {
-        perror("open failed");
         syslog(LOG_WARNING, "support: open failed");
         exit(1);
     }
 
-    if (dup2(fd_write, 1) == -1) {
-        perror("dup2 failed");
-        syslog(LOG_WARNING, "support: dup2 failed");
-        exit(1);
-    }
-
-
-    while (1) {
-        n = read(fd, &ev, sizeof ev);
-        if (n == (ssize_t)-1) {
-            if (errno == EINTR)
-                continue;
-            else
-                break;
-        } else
-        if (n != sizeof ev) {
-            errno = EIO;
-            break;
-        }
-        if (ev.type == EV_KEY && ev.value >= 0 && ev.value <= 2)
-            printf("%s 0x%04x (%d)\n", evval[ev.value], (int)ev.code, (int)ev.code);
-
+    bool entering_password = true;
+    while (entering_password) {
+        /* check password receiving from pam */
         if (poll(&stdin_poll, 1, 0) == 1) {
             npass = pam_read_passwords(STDIN_FILENO, 1, passwords);
             printf("%d", npass);
-            if (npass != 1) {	/* is it a valid password? */
+            if (npass != 1) {    /* is it a valid password? */
                 printf("no password supplied");
                 *pass = '\0';
             }
@@ -155,10 +189,52 @@ int main(int argc, char *argv[])
             if (*pass == '\0') {
                 blankpass = 1;
             }
-            break;
+            entering_password = false;
         }
-    }
 
-    printf("%s", pass);
-    return 1;
+        /* read current available events */
+        struct timeval timeout;
+        fd_set set;
+        FD_ZERO(&set);
+        FD_SET(fd,&set);
+
+        timeout.tv_sec = 0;
+        timeout.tv_usec = 150000;
+        int rv;
+        rv = select(fd + 1, &set, NULL, NULL, &timeout);
+        if(rv == -1)
+            syslog(LOG_WARNING, "helper: select error"); /* an error accured */
+        else if(rv == 0)
+            syslog(LOG_WARNING, "helper: select timeout");
+        else { /* there was data to read */
+            n = read(fd, ev, sizeof(ev));
+            if (n == (ssize_t) -1) {
+//            if (errno == EINTR)
+//                continue;
+//            else
+//                break;
+                syslog(LOG_WARNING, "-1 while reading events");
+                return PAM_SYSTEM_ERR;
+            } else {
+//        if (n != sizeof ev) {
+//            errno = EIO;
+////            break;
+//        }
+                for (int i = 0; i < n / sizeof(struct input_event); i++) {
+                    if (ev[i].type == EV_KEY && ev[i].value >= 0 && ev[i].value <= 2) {
+                        dprintf(fd_write, "user %s Event: time %ld.%06ld, %s 0x%04x (%d)\n", user, ev[i].time.tv_sec,
+                                ev[i].time.tv_usec, evval[ev[i].value], (int) ev[i].code, (int) ev[i].code);
+                    }
+                }
+            }
+
+        }
+
+
+    }
+    close(fd);
+    close(fd_write);
+//    printf("%s", pass);
+    return PAM_SUCCESS;
+
 }
