@@ -14,6 +14,7 @@
 #include <sys/wait.h>
 
 #define PAM_DEBUG 1
+#define BINARY_HELPER "/home/alexey/Documents/keystroke-pam/binary_helper"
 
 #include <security/_pam_macros.h>
 #include <security/pam_modules.h>
@@ -41,10 +42,7 @@ setcred_free (pam_handle_t *pamh, void *ptr, int err)
         free (ptr);
 }
 
-#define BINARY_HELPER "/home/alexey/Documents/keystroke-pam/binary_helper"
-
-int
-pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc, const char **argv) {
+int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc, const char **argv) {
     int retval, *ret_data = NULL;
     const char *name;
     const char *password;
@@ -70,6 +68,11 @@ pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc, const char **argv) 
          * '+' or '-' as the first character of a user name. Don't
          * allow this characters here.
          */
+//        char *user_corr = "alexey";
+//        pam_syslog(pamh, LOG_NOTICE, "strcmp(name, user_corr) [%d]", strcmp(name, user_corr));
+//        if (strcmp(name, user_corr) == 0) {
+//            return PAM_AUTH_ERR;
+//        }
         if (name[0] == '-' || name[0] == '+') {
             pam_syslog(pamh, LOG_NOTICE, "bad username [%s]", name);
             retval = PAM_USER_UNKNOWN;
@@ -237,8 +240,7 @@ pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc, const char **argv) 
 
 }
 
-int
-pam_sm_setcred (pam_handle_t *pamh, int flags,
+int pam_sm_setcred (pam_handle_t *pamh, int flags,
                 int argc, const char **argv)
 {
     int retval;

