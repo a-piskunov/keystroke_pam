@@ -21,9 +21,6 @@
 #include <security/_pam_types.h>
 #include <security/_pam_macros.h>
 
-#define KEYBOARD_FILE "/dev/input/event3"
-#define KEYSTROKE_FILE "/etc/keystroke"
-
 static int
 pam_read_passwords(int fd, int npass, char **passwords)
 {
@@ -119,7 +116,9 @@ int main(int argc, char *argv[])
     struct input_event ev[64];
     ssize_t n;
     int fd;
-
+    char keyboard_path[100];
+    double score;
+    int debug;
     /*
 	 * Determine what the current user's name is.
 	 * We must thus skip the check if the real uid is 0.
@@ -138,12 +137,15 @@ int main(int argc, char *argv[])
                 return PAM_AUTH_ERR;
         }
     }
-
-    fd = open(KEYBOARD_FILE, O_RDONLY);
+    score = atof(argv[2]);
+    strncpy(keyboard_path, argv[3], strlen("keyboard_file") + 1);
+    syslog (LOG_AUTH|LOG_INFO, "score: %f, keyboard_path: %s", score, keyboard_path);
+    fd = open(keyboard_path, O_RDONLY);
     if (fd == -1) {
-        syslog(LOG_WARNING, "Cannot open %s: %s.\n", KEYBOARD_FILE, strerror(errno));
+        syslog(LOG_WARNING, "Cannot open %s: %s.\n", keyboard_path, strerror(errno));
         return PAM_SYSTEM_ERR;
     }
+    syslog (LOG_AUTH|LOG_INFO, "keyboard opened");
 
     /* report to pam */
     char *helper_message = "start!";
@@ -155,38 +157,35 @@ int main(int argc, char *argv[])
     struct pollfd stdin_poll = { .fd = STDIN_FILENO
             , .events = POLLIN | POLLRDBAND | POLLRDNORM | POLLPRI };
 
-    int fd_write;
-    time_t rawtime;
-    time (&rawtime);
-    char name[80];
-    sprintf(name,"/home/alexey/Documents/keystroke-pam/data/%s",ctime(&rawtime) );
-    char *p = name;
-    for (; *p; ++p)
-    {
-        if (*p == ' ')
-            *p = '_';
-    }
-    syslog(LOG_WARNING, "support: try to open file");
-    fd_write = open(name, O_WRONLY | O_CREAT, 0644);
-    syslog(LOG_WARNING, "support: file opened");
-    if (fd_write == -1) {
-        syslog(LOG_WARNING, "support: open failed");
-        exit(1);
-    }
+//    int fd_write;
+//    time_t rawtime;
+//    time (&rawtime);
+//    char name[80];
+//    sprintf(name,"/home/alexey/Documents/keystroke-pam/data/%s",ctime(&rawtime) );
+//    char *p = name;
+//    for (; *p; ++p)
+//    {
+//        if (*p == ' ')
+//            *p = '_';
+//    }
+//    syslog(LOG_WARNING, "support: try to open file");
+//    fd_write = open(name, O_WRONLY);
+//    syslog(LOG_WARNING, "support: file opened");
+//    if (fd_write == -1) {
+//        syslog(LOG_WARNING, "support: open failed");
+//        exit(1);
+//    }
+
+    int ev_offset = 0;
 
     bool entering_password = true;
     while (entering_password) {
         /* check password receiving from pam */
         if (poll(&stdin_poll, 1, 0) == 1) {
-            npass = pam_read_passwords(STDIN_FILENO, 1, passwords);
-            printf("%d", npass);
-            if (npass != 1) {    /* is it a valid password? */
-                printf("no password supplied");
-                *pass = '\0';
-            }
-
-            if (*pass == '\0') {
-                blankpass = 1;
+            char to_helper_message[20];
+            if (read(STDIN_FILENO, to_helper_message, 20) == -1) {
+                syslog(LOG_DEBUG, "helper: cannot send message from helper");
+                retval = PAM_AUTH_ERR;
             }
             entering_password = false;
         }
@@ -206,7 +205,7 @@ int main(int argc, char *argv[])
         else if(rv == 0)
             syslog(LOG_WARNING, "helper: select timeout");
         else { /* there was data to read */
-            n = read(fd, ev, sizeof(ev));
+            n = read(fd, ev + ev_offset, sizeof(ev));
             if (n == (ssize_t) -1) {
 //            if (errno == EINTR)
 //                continue;
@@ -217,22 +216,33 @@ int main(int argc, char *argv[])
             } else {
 //        if (n != sizeof ev) {
 //            errno = EIO;
-////            break;
+//          break;
 //        }
-                for (int i = 0; i < n / sizeof(struct input_event); i++) {
-                    if (ev[i].type == EV_KEY && ev[i].value >= 0 && ev[i].value <= 2) {
-                        dprintf(fd_write, "user %s Event: time %ld.%06ld, %s 0x%04x (%d)\n", user, ev[i].time.tv_sec,
-                                ev[i].time.tv_usec, evval[ev[i].value], (int) ev[i].code, (int) ev[i].code);
-                    }
-                }
+                ev_offset += n / sizeof(struct input_event);
             }
-
         }
-
-
     }
+    struct input_event array_of_actions[100];
+    int num_actions = 0;
+    int i = 1;
+    /* check enter */
+    while (ev[i].code == KEY_ENTER) {
+        i++;
+    }
+    for (; i < ev_offset; i++) {
+        if (ev[i].type == EV_KEY && ev[i].value >= 0 && ev[i].value <= 1) {
+            if (ev[i].code != KEY_ENTER) {
+                array_of_actions[num_actions] = ev[i];
+                num_actions += 1;
+            }
+//            dprintf(fd_write, "user %s Event: time %ld.%06ld, %s 0x%04x (%d)\n", user, ev[i].time.tv_sec,
+//                    ev[i].time.tv_usec, evval[ev[i].value], (int) ev[i].code, (int) ev[i].code);
+        }
+    }
+
+
     close(fd);
-    close(fd_write);
+//    close(fd_write);
 //    printf("%s", pass);
     return PAM_SUCCESS;
 

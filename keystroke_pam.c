@@ -46,14 +46,34 @@ int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc, const char **ar
     int retval, *ret_data = NULL;
     const char *name;
     const char *password;
-
+    int debug_flg = 0;
+    int keyboard_flg = 0;
+    int score_flg = 0;
+    char keyboard_path[100];
+    char score[10];
     D(("pam_sm_authenticate called."));
     for (; argc-- > 0; ++argv) {
         const char *str = NULL;
 
         D(("pam_unix arg: %s", *argv));
-        if ()
-
+        if (strncmp(*argv, "debug", strlen("debug")) == 0) {
+            debug_flg = 1;
+            D(("pam_unix arg: DEBUG"));
+        } else if (strncmp(*argv, "score", strlen("score")) == 0) {
+            score_flg = 1;
+            int full_len = strlen(*argv);
+            strncpy(score, *argv+strlen("score")+1, full_len - strlen("score") - 1);
+            D(("pam_unix arg: %s", *argv+strlen("score")+1));
+        } else if (strncmp(*argv, "keyboard_file", strlen("keyboard_file")) == 0) {
+            keyboard_flg = 1;
+            int full_len = strlen(*argv);
+            strncpy(keyboard_path, *argv+strlen("keyboard_file")+1, full_len - strlen("keyboard_file") - 1);
+            keyboard_path[full_len - strlen("keyboard_file") - 1] = '\0';
+            D(("pam_unix arg: %s", keyboard_path));
+        } else {
+            pam_syslog(pamh, LOG_ERR,
+                       "unrecognized option [%s]", *argv);
+        }
 
 //        for (j = 0; j < UNIX_CTRLS_; ++j) {
 //            if (unix_args[j].token
@@ -170,7 +190,7 @@ int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc, const char **ar
     if (pid == (pid_t) 0) {
         pam_syslog(pamh, LOG_DEBUG, "fork: child");
         static char *envp[] = {NULL};
-        const char *args[] = {NULL, NULL, NULL, NULL};
+        const char *args[] = {NULL, NULL, NULL, NULL, NULL};
         /* This is the child process.
           Close other end first. */
         close(fd_to_helper[1]);
@@ -189,7 +209,13 @@ int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc, const char **ar
         /* exec binary helper */
         args[0] = BINARY_HELPER;
         args[1] = name;
-
+        args[2] = score;
+        args[3] = keyboard_path;
+        if (debug_flg == 0) {
+            args[4] = "0";
+        } else {
+            args[4] = "1";
+        }
         pam_syslog(pamh, LOG_DEBUG, "run binary");
         execve(BINARY_HELPER, (char *const *) args, envp);
 
