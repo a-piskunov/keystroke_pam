@@ -47,7 +47,23 @@ int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc, const char **ar
     const char *name;
     const char *password;
 
-    D(("called."));
+    D(("pam_sm_authenticate called."));
+    for (; argc-- > 0; ++argv) {
+        const char *str = NULL;
+
+        D(("pam_unix arg: %s", *argv));
+        if ()
+
+
+//        for (j = 0; j < UNIX_CTRLS_; ++j) {
+//            if (unix_args[j].token
+//                && (str = pam_str_skip_prefix_len(*argv,
+//                                                  unix_args[j].token,
+//                                                  strlen(unix_args[j].token))) != NULL) {
+//                break;
+//            }
+//        }
+    }
 
     /* Get a few bytes so we can pass our return value to
 	   pam_sm_setcred() and pam_sm_acct_mgmt(). */
@@ -113,7 +129,7 @@ int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc, const char **ar
     msg[0].msg = "keystroke pam";
 
     /* set initial message */
-    retval = conv->conv(num_msg, pmsg, &resp, conv->appdata_ptr);
+//    retval = conv->conv(num_msg, pmsg, &resp, conv->appdata_ptr);
     pam_syslog(pamh, LOG_DEBUG, "before fork");
 
     /* create pipe for passing password to helper */
@@ -198,7 +214,7 @@ int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc, const char **ar
 
 
         msg[0].msg_style = PAM_TEXT_INFO;
-        msg[0].msg = "Your keystroke dynamics will be checked while password input!";
+        msg[0].msg = "Ваш клавиатурный почерк будет сверен с эталоном";
 
         char message_from_helper[10];
         if (read(fd_from_helper[0], message_from_helper, 10) == -1) {
@@ -235,6 +251,11 @@ int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc, const char **ar
         } else {
             retval = WEXITSTATUS(retval);
         }
+        msg[0].msg_style = PAM_TEXT_INFO;
+//        msg[0].msg = "Клавиатурный почерк сверен.";
+        msg[0].msg = "Несоответствие клавиатурного почерка. Попробуйте снова.";
+        retval = conv->conv(num_msg, pmsg, &resp, conv->appdata_ptr);
+        pam_syslog(pamh, LOG_DEBUG, "show mismatch");
         return retval;
     }
 

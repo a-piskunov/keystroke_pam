@@ -32,6 +32,7 @@ int main() {
     }
     printf("\n");
     double score;
-    score = score_keystrokes(x, rows, cols, target);
+    double norm_score = -1;
+    score = score_keystrokes(x, rows, cols, target, &norm_score);
     printf("%f\n", score);
 }

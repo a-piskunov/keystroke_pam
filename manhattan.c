@@ -82,7 +82,8 @@ void normalize_vectors(double *fit_vectors, int fit_vectors_num, int features_nu
     }
 }
 
-void fit_classifier(double *fit_vectors, int fit_vectors_num, int features_number, double *mean_vector) {
+void fit_classifier(double *fit_vectors, int fit_vectors_num,
+                    int features_number, double *mean_vector, double *norm_score) {
     for (int i=0; i<fit_vectors_num; i++) {
         for (int j=0; j<features_number; j++) {
             mean_vector[j] += fit_vectors[i * fit_vectors_num + j];
@@ -91,15 +92,38 @@ void fit_classifier(double *fit_vectors, int fit_vectors_num, int features_numbe
     for (int i=0; i<features_number; i++) {
         mean_vector[i] /= fit_vectors_num;
     }
+    if (*norm_score < 0) {
+        printf("calc norm score\n");
+        double *fit_scores;
+        fit_scores = calloc(features_number, sizeof(*fit_scores));
+        double scores_mean = 0;
+        printf("scores_mean: ");
+        for (int i=0; i<fit_vectors_num; i++) {
+            fit_scores[i] = score_vector(features_number, mean_vector, fit_vectors + i * features_number, (double)1);
+            scores_mean += fit_scores[i];
+            printf("%f ", fit_scores[i]);
+        }
+        printf("\n");
+        scores_mean /= fit_vectors_num;
+        printf("scores_mean %f\n", scores_mean);
+        double scores_std = 0;
+        for (int i=0; i<fit_vectors_num; i++) {
+            scores_std += pow(fit_scores[i] - scores_mean, 2);
+        }
+        scores_std = sqrt(scores_std / fit_vectors_num);
+        printf("scores_std: %f\n", scores_std);
+        *norm_score = fabs(scores_mean - 2 * scores_std);
+        printf("norm_score %f\n", *norm_score);
+    }
 }
 
-double score_vector(int features_number, double *mean_vector, double *score_vector) {
+double score_vector(int features_number, double *mean_vector, double *score_vector, double norm_score) {
     double score = 0;
     for (int i = 0; i<features_number; i++) {
         score += fabs(mean_vector[i] - score_vector[i]);
-        printf("%.2f\n", fabs(mean_vector[i] - score_vector[i]));
+//        printf("%.2f\n", fabs(mean_vector[i] - score_vector[i]));
     }
-    return score;
+    return - score / norm_score;
 }
 
 void print_array(double *array, int rows, int cols) {
@@ -111,8 +135,8 @@ void print_array(double *array, int rows, int cols) {
     }
 }
 
-double score_keystrokes(double *fit_vectors, int fit_vectors_num, int features_number, double *target_vector)
-{
+double score_keystrokes(double *fit_vectors, int fit_vectors_num, int features_number,
+                        double *target_vector, double *norm_score) {
     double flight_mean, flight_std, hold_mean, hold_std;
     compute_std_mean(fit_vectors, fit_vectors_num, features_number, &flight_mean, &flight_std, &hold_mean, &hold_std);
     printf("flight_mean: %.2f\nflight_std: %.2f\nhold_mean: %.2f\nhold_std: %.2f\n",
@@ -121,12 +145,13 @@ double score_keystrokes(double *fit_vectors, int fit_vectors_num, int features_n
     print_array(fit_vectors, fit_vectors_num, features_number);
     double *mean_vector;
     mean_vector = calloc(features_number, sizeof(*mean_vector));
-    fit_classifier(fit_vectors, fit_vectors_num, features_number, mean_vector);
+    fit_classifier(fit_vectors, fit_vectors_num, features_number, mean_vector, norm_score);
     printf("mean_vector :\n");
     for (int i = 0; i<features_number; i++) {
         printf("%5.2f ", mean_vector[i]);
     }
     printf("\n");
+
     normalize_line(target_vector, features_number, &flight_mean, &flight_std, &hold_mean, &hold_std);
 
     printf("target_norm_vector :\n");
@@ -134,6 +159,6 @@ double score_keystrokes(double *fit_vectors, int fit_vectors_num, int features_n
         printf("%5.2f ", target_vector[i]);
     }
     printf("\n");
-
-    return score_vector(features_number, mean_vector, target_vector);
+    printf("norm_score %f\n", *norm_score);
+    return score_vector(features_number, mean_vector, target_vector, *norm_score);
 }
