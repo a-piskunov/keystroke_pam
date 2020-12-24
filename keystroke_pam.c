@@ -14,7 +14,7 @@
 #include <sys/wait.h>
 
 #define PAM_DEBUG 1
-#define BINARY_HELPER "/home/alexey/Documents/keystroke-pam/binary_helper"
+#define BINARY_HELPER "/usr/sbin/binary_helper"
 
 #include <security/_pam_macros.h>
 #include <security/pam_modules.h>
@@ -190,7 +190,7 @@ int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc, const char **ar
     if (pid == (pid_t) 0) {
         pam_syslog(pamh, LOG_DEBUG, "fork: child");
         static char *envp[] = {NULL};
-        const char *args[] = {NULL, NULL, NULL, NULL, NULL};
+        const char *args[] = {NULL, NULL, NULL, NULL, NULL, NULL};
         /* This is the child process.
           Close other end first. */
         close(fd_to_helper[1]);
@@ -249,7 +249,7 @@ int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc, const char **ar
         } else {
             pam_syslog(pamh, LOG_DEBUG, "message from helper: %s", message_from_helper);
         }
-        close(fd_from_helper[0]);
+
 
         retval = conv->conv(num_msg, pmsg, &resp, conv->appdata_ptr);
         pam_syslog(pamh, LOG_DEBUG, "show note");
@@ -257,7 +257,7 @@ int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc, const char **ar
         int rc = 0;
         const char *password;
         retval = pam_get_authtok(pamh, PAM_AUTHTOK, &password, NULL);
-        pam_syslog(pamh, LOG_DEBUG, "password=%s\n", password);
+//        pam_syslog(pamh, LOG_DEBUG, "password=%s\n", password);
         int len = strlen(password);
         if (write(fd_to_helper[1], password, len) == -1) {
             pam_syslog(pamh, LOG_DEBUG, "Cannot send password to helper");
@@ -266,23 +266,34 @@ int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc, const char **ar
         password = NULL;
         pam_syslog(pamh, LOG_DEBUG, "password written\n");
         close(fd_to_helper[1]);
+        int return_status;
+        if (read(fd_from_helper[0], &return_status, sizeof(int)) == -1) {
+            pam_syslog(pamh, LOG_DEBUG, "Cannot receive message from helper");
+            retval = PAM_AUTH_ERR;
+        } else {
+            pam_syslog(pamh, LOG_DEBUG, "return_status from helper: %d", return_status);
+        }
+        close(fd_from_helper[0]);
 
-        while ((rc = waitpid(pid, &retval, 0)) < 0 && errno == EINTR);
-        if (rc < 0) {
-            pam_syslog(pamh, LOG_DEBUG, "unix_chkpwd waitpid returned ");
+        while ((rc=waitpid(pid, &retval, 0)) < 0 && errno == EINTR);
+        if (rc<0) {
+            pam_syslog(pamh, LOG_ERR, "unix_chkpwd waitpid returned %d: %m", rc);
             retval = PAM_AUTH_ERR;
         } else if (!WIFEXITED(retval)) {
-            pam_syslog(pamh, LOG_DEBUG, "unix_chkpwd abnormal exit:");
+//            pam_syslog(pamh, LOG_ERR, "unix_chkpwd abnormal exit: %d", retval);
             retval = PAM_AUTH_ERR;
         } else {
             retval = WEXITSTATUS(retval);
         }
         msg[0].msg_style = PAM_TEXT_INFO;
-//        msg[0].msg = "Клавиатурный почерк сверен.";
-        msg[0].msg = "Несоответствие клавиатурного почерка. Попробуйте снова.";
+        if (return_status) {
+            msg[0].msg = "Несоответствие клавиатурного почерка. Попробуйте снова.";
+        } else {
+            msg[0].msg = "Клавиатурный почерк сверен.";
+        }
         retval = conv->conv(num_msg, pmsg, &resp, conv->appdata_ptr);
-        pam_syslog(pamh, LOG_DEBUG, "show mismatch");
-        return retval;
+        pam_syslog(pamh, LOG_DEBUG, "notification showed");
+        return return_status;
     }
 
 }
