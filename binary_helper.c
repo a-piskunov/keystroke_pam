@@ -22,66 +22,6 @@
 #include <security/_pam_macros.h>
 #include "manhattan.h"
 
-static int
-pam_read_passwords(int fd, int npass, char **passwords)
-{
-    /*
-     * The passwords array must contain npass preallocated
-     * buffers of length PAM_MAX_RESP_SIZE + 1.
-     */
-    int rbytes = 0;
-    int offset = 0;
-    int i = 0;
-    char *pptr;
-    while (npass > 0) {
-        printf("npass %d\n", npass);
-        rbytes = read(fd, passwords[i]+offset, PAM_MAX_RESP_SIZE+1-offset);
-        printf("rbytes %d\n", rbytes);
-        printf("passwords %s\n", passwords[i]+offset);
-        if (rbytes < 0) {
-            printf("rbytes < 0\n");
-            if (errno == EINTR) {
-                continue;
-            }
-            break;
-        }
-        if (rbytes == 0) {
-            printf("rbytes == 0\n");
-            break;
-        }
-        printf("char from pass (5) %c\n", passwords[i][4]);
-        if (passwords[i][5] == '\n')  {
-            printf("ok\n");
-        }
-        while (npass > 0 &&
-               (pptr = memchr(passwords[i] + offset, '\0', rbytes)) != NULL) {
-            ++pptr; /* skip the '\0' */
-            rbytes -= pptr - (passwords[i] + offset);
-            printf("rbytes decreased %d\n", rbytes);
-            i++;
-            printf("%d", i);
-            offset = 0;
-            npass--;
-            printf("%d", npass);
-            if (rbytes > 0) {
-                if (npass > 0) {
-                    memcpy(passwords[i], pptr, rbytes);
-                }
-                memset(pptr, '\0', rbytes);
-            }
-        }
-        offset += rbytes;
-    }
-
-    /* clear up */
-    if (offset > 0 && npass > 0) {
-        printf("clear up\n");
-        memset(passwords[i], '\0', offset);
-    }
-
-    return i;
-}
-
 static const char *const evval[3] = {
         "RELEASED",
         "PRESSED ",
@@ -106,109 +46,74 @@ getuidname(uid_t uid)
 
 int main(int argc, char *argv[])
 {
-    char pass[PAM_MAX_RESP_SIZE + 1];
-    char *option;
-    int npass, nullok;
-    int blankpass = 0;
     int retval = PAM_AUTH_ERR;
     char *user;
-    char *passwords[] = { pass };
-//    const char *dev = KEYBOARD_FILE;
     struct input_event ev[300];
     ssize_t n;
     int fd;
     char keyboard_path[100];
     double score;
     int debug;
-    /*
-	 * Determine what the current user's name is.
-	 * We must thus skip the check if the real uid is 0.
-	 */
 
     user=argv[1];
-    if (getuid() == 0) {
-        user=argv[1];
-    }
-    else {
-        user = getuidname(getuid());
-        /* if the caller specifies the username, verify that user
-           matches it */
-        if (user == NULL || strcmp(user, argv[1])) {
-            user = argv[1];
-            /* no match -> permanently change to the real user and proceed */
-            if (setuid(getuid()) != 0)
-                return PAM_AUTH_ERR;
-        }
-    }
+
     score = atof(argv[2]);
     strncpy(keyboard_path, argv[3], strlen(argv[3]) + 1);
-    syslog (LOG_AUTH|LOG_INFO, "score: %f, keyboard_path: %s", score, keyboard_path);
+    if (argv[4][0] == '0') {
+        debug = 0;
+    } else {
+        debug = 1;
+    }
+    if (debug) {
+        syslog(LOG_AUTH | LOG_INFO, "score: %f, keyboard_path: %s", score, keyboard_path);
+    }
     fd = open(keyboard_path, O_RDONLY);
     if (fd == -1) {
-        syslog(LOG_AUTH|LOG_INFO, "Cannot open %s: %s.\n", keyboard_path, strerror(errno));
+        syslog(LOG_AUTH|LOG_ERR, "Cannot open %s: %s.\n", keyboard_path, strerror(errno));
+        /* report error to pam */
+        int helper_message = 1;
+        if (write(STDOUT_FILENO, &helper_message, sizeof(int)) == -1) {
+            syslog(LOG_AUTH|LOG_ERR, "helper: cannot send message from helper");
+        }
         return PAM_SYSTEM_ERR;
     }
-    syslog (LOG_AUTH|LOG_INFO, "keyboard opened");
-
-    /* report to pam */
-    char *helper_message = "start!";
-    int len = strlen(helper_message);
-    if (write(STDOUT_FILENO, helper_message, len+1) == -1) {
-        syslog(LOG_DEBUG, "helper: cannot send message from helper");
+     /* report to pam */
+    int helper_message = 0;
+    if (write(STDOUT_FILENO, &helper_message, sizeof(int)) == -1) {
+        syslog(LOG_AUTH|LOG_ERR, "helper: cannot send message from helper");
         retval = PAM_AUTH_ERR;
     }
+    syslog(LOG_AUTH|LOG_ERR, "helper: to pam");
     struct pollfd stdin_poll = { .fd = STDIN_FILENO
             , .events = POLLIN | POLLRDBAND | POLLRDNORM | POLLPRI };
-
-//    int fd_write;
-//    time_t rawtime;
-//    time (&rawtime);
-//    char name[80];
-//    sprintf(name,"/home/alexey/Documents/keystroke-pam/data/%s",ctime(&rawtime) );
-//    char *p = name;
-//    for (; *p; ++p)
-//    {
-//        if (*p == ' ')
-//            *p = '_';
-//    }
-//    syslog(LOG_WARNING, "support: try to open file");
-//    fd_write = open(name, O_WRONLY);
-//    syslog(LOG_WARNING, "support: file opened");
-//    if (fd_write == -1) {
-//        syslog(LOG_WARNING, "support: open failed");
-//        exit(1);
-//    }
 
     int ev_offset = 0;
 
     bool entering_password = true;
     while (entering_password) {
+        syslog(LOG_AUTH|LOG_ERR, "while");
         /* check password receiving from pam */
         if (poll(&stdin_poll, 1, 0) == 1) {
-            char to_helper_message[20];
-            if (read(STDIN_FILENO, to_helper_message, 20) == -1) {
-                syslog(LOG_DEBUG, "helper: cannot send message from helper");
+            int finish_flag;
+            if (read(STDIN_FILENO, &finish_flag, sizeof(int)) == -1) {
+                syslog(LOG_AUTH|LOG_ERR, "helper: cannot send message from helper");
                 retval = PAM_AUTH_ERR;
             }
-            syslog (LOG_AUTH|LOG_ERR, "helper: end password input");
+            syslog(LOG_AUTH|LOG_ERR, "helper: finish password");
             entering_password = false;
         }
-
         /* read current available events */
         struct timeval timeout;
         fd_set set;
         FD_ZERO(&set);
         FD_SET(fd,&set);
-
         timeout.tv_sec = 0;
         timeout.tv_usec = 150000;
         int rv;
         rv = select(fd + 1, &set, NULL, NULL, &timeout);
         if(rv == -1)
             syslog(LOG_WARNING, "helper: select error"); /* an error accured */
-        else if(rv == 0)
-            syslog(LOG_WARNING, "helper: select timeout");
-        else { /* there was data to read */
+        else if(rv > 0) { /* there was data to read */
             n = read(fd, ev + ev_offset, sizeof(ev));
             if (n == (ssize_t) -1) {
 //            if (errno == EINTR)
@@ -238,18 +143,19 @@ int main(int argc, char *argv[])
             if (ev[i].code != KEY_ENTER) {
                 array_of_actions[num_actions] = ev[i];
                 num_actions += 1;
-                syslog(LOG_AUTH|LOG_INFO, "helper: user %s Event: time %ld.%06ld, %s 0x%04x (%d)", user, ev[i].time.tv_sec,
-                    ev[i].time.tv_usec, evval[ev[i].value], (int) ev[i].code, (int) ev[i].code);
+                if (debug) {
+                    syslog(LOG_AUTH | LOG_INFO, "helper: user %s Event: time %ld.%06ld, %s (%d)", user,
+                           ev[i].time.tv_sec,
+                           ev[i].time.tv_usec, evval[ev[i].value], (int) ev[i].code);
+                }
             }
-//            dprintf(fd_write, "user %s Event: time %ld.%06ld, %s 0x%04x (%d)\n", user, ev[i].time.tv_sec,
-//                    ev[i].time.tv_usec, evval[ev[i].value], (int) ev[i].code, (int) ev[i].code);
         }
     }
     long int last_press_time_sec = 0;
     long int last_press_time_usec = 0;
 
-    double *time_features = malloc((num_actions - 1) * sizeof(*time_features));
-    int *correct_keycodes = malloc(num_actions * sizeof(*correct_keycodes));
+    double *time_features = malloc(num_actions * sizeof(double));
+    int *correct_keycodes = malloc(num_actions * sizeof(int));
     int keycodes_num = 0;
     int features_num = 0;
     for (int i = 0; i < num_actions; i++) {
@@ -262,11 +168,10 @@ int main(int argc, char *argv[])
                                 (double) (array_of_actions[i].time.tv_usec - last_press_time_usec) / 1000;
                 if ((num_actions - 1) < features_num) {
                     syslog (LOG_AUTH|LOG_ERR, "helper: error while feature extraction");
-                    return EXIT_FAILURE;
+                    return PAM_SYSTEM_ERR;
                 }
                 time_features[features_num] = flight;
                 features_num++;
-                printf("flight %f", flight);
             }
             bool not_found_up = true;
             int j = i + 1;
@@ -280,7 +185,7 @@ int main(int argc, char *argv[])
                             1000;
                     if ((num_actions - 1) < features_num) {
                         syslog (LOG_AUTH|LOG_ERR, "helper: error while feature extraction");
-                        return EXIT_FAILURE;
+                        return PAM_SYSTEM_ERR;
                     }
                     time_features[features_num] = hold;
                     features_num++;
@@ -292,10 +197,6 @@ int main(int argc, char *argv[])
             last_press_time_usec = array_of_actions[i].time.tv_usec;
         }
     }
-    char features[100] = "features: ";
-    for (int i = 0; i < features_num; i++) {
-        ftoa(1.555, time_features, 2)
-    }
 
     /* read from file */
     char user_file_path[100] = "/etc/keystroke-pam/";
@@ -303,54 +204,107 @@ int main(int argc, char *argv[])
     FILE *f = fopen(user_file_path,"r");
     if ( !f ) {
         syslog (LOG_AUTH|LOG_ERR, "Error: Unable to open input file.\n");
-//        exit(EXIT_FAILURE);
+        return PAM_SYSTEM_ERR;
     }
+    syslog (LOG_AUTH|LOG_ERR, "open file. %s", user_file_path);
     int rows, cols;
     double norm_score;
     if ( fscanf(f,"%lf%d%d", &norm_score, &rows, &cols) != 3 ) {
         syslog (LOG_AUTH|LOG_ERR, "Error: wrong file format.\n");
-//        exit(EXIT_FAILURE);
+        return PAM_SYSTEM_ERR;
     }
+    syslog (LOG_AUTH|LOG_ERR, "open file. %s", user_file_path);
+    if (cols != features_num) {
+        syslog (LOG_AUTH|LOG_ERR, "features_num is not equal: cols=%d, features_num=%d", cols, features_num);
+        int res = PAM_AUTH_ERR;
+        if (write(STDOUT_FILENO, &res, sizeof(int)) == -1) {
+            syslog(LOG_AUTH|LOG_ERR, "helper: cannot send message from helper");
+            retval = PAM_AUTH_ERR;
+        }
+        return res;
+    }
+
     syslog (LOG_AUTH|LOG_INFO, "norm: %lf\n", norm_score);
     syslog (LOG_AUTH|LOG_INFO, "rows, cols %d, %d\n", rows, cols);
     double *passwords_features;
+    double *passwords_features_copy;
+    bool find_EOF = false;
     passwords_features = malloc(rows * cols * sizeof(double));
+    passwords_features_copy = malloc(rows * cols * sizeof(double));
     for (int i = 0; i < rows; i++) {
+        syslog (LOG_AUTH|LOG_INFO, "read row %d\n", i);
         for (int j = 0; j < cols; j++) {
-            fscanf(f,"%lf", &passwords_features[i * cols + j]);
+            syslog (LOG_AUTH|LOG_INFO, "read feature %d\n", j);
+            double feature;
+            if (fscanf(f,"%lf", &feature) == EOF) {
+                find_EOF = true;
+                syslog (LOG_AUTH|LOG_INFO, "find EOF");
+            } else {
+                passwords_features[i * cols + j] = passwords_features_copy[i * cols + j] = feature;
+            }
         }
     }
+    if (find_EOF) {
+        syslog(LOG_AUTH|LOG_ERR, "corrupted format");
+        return PAM_SYSTEM_ERR;
+    }
     fclose(f);
-    if (cols != features_num) {
-        syslog (LOG_AUTH|LOG_ERR, "features_num is not equal: cols=%d, features_num=%d", cols, features_num);
-//        exit(EXIT_FAILURE);
+    double *time_features_copy = malloc(features_num * sizeof(double));
+    for (int i = 0; i < features_num; i++) {
+        time_features_copy[i] = time_features[i];
     }
     double result_score;
     result_score = score_keystrokes(passwords_features, rows,
                      features_num, time_features, &norm_score);
-    syslog (LOG_AUTH|LOG_INFO, "result_score %f", result_score);
+    if (debug) {
+        syslog(LOG_AUTH | LOG_INFO, "result score: %f", result_score);
+    }
+
     free(passwords_features);
     free(correct_keycodes);
     free(time_features);
     close(fd);
 
     if (result_score >= score) {
+        char user_file_path_tmp[100];
+        strcpy(user_file_path_tmp, user_file_path);
+        strcat(user_file_path_tmp, "_tmp");
+        int fd = open(user_file_path_tmp, O_WRONLY | O_CREAT, 00600);
+        if (fd < 0) {
+            syslog(LOG_AUTH | LOG_INFO, "temp file creation error");
+        };
+        dprintf(fd, "%f\n%d %d\n", norm_score, rows + 1, cols);
+        for (int i = 0; i < rows; i++) {
+            for (int j = 0; j < cols; j++) {
+                dprintf(fd, "%.3f ", passwords_features_copy[i * cols + j]);
+            }
+            dprintf(fd, "\n");
+        }
+        for (int j = 0; j < cols; j++) {
+            dprintf(fd, "%.3f ", time_features_copy[j]);
+        }
+        dprintf(fd, "\n");
+        close(fd);
+        free(time_features_copy);
+        /* Delete original source file */
+        remove(user_file_path);
+        /* Rename temporary file as original file */
+        rename(user_file_path_tmp, user_file_path);
         /* report to pam */
         int res = PAM_SUCCESS;
         if (write(STDOUT_FILENO, &res, sizeof(int)) == -1) {
-            syslog(LOG_DEBUG, "helper: cannot send message from helper");
+            syslog(LOG_AUTH|LOG_ERR, "helper: cannot send message from helper");
             retval = PAM_AUTH_ERR;
         }
-        syslog (LOG_AUTH|LOG_INFO, "PAM_SUCCESS returned");
-        exit(PAM_SUCCESS);
+        return res;
     } else {
+        free(time_features_copy);
         /* report to pam */
         int res = PAM_AUTH_ERR;
         if (write(STDOUT_FILENO, &res, sizeof(int)) == -1) {
-            syslog(LOG_DEBUG, "helper: cannot send message from helper");
+            syslog(LOG_AUTH|LOG_ERR, "helper: cannot send message from helper");
             retval = PAM_AUTH_ERR;
         }
-        syslog (LOG_AUTH|LOG_INFO, "PAM_AUTH_ERR returned");
-        exit(PAM_AUTH_ERR);
+        return res;
     }
 }
