@@ -240,7 +240,10 @@ int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc, const char **ar
             pam_syslog(pamh, LOG_ERR, "normal exit: %d", retval);
         }
         msg[0].msg_style = PAM_TEXT_INFO;
-        if (return_status) {
+        if (return_status == PAM_USER_UNKNOWN) {
+            msg[0].msg = "Эталон клавиатурного почерка не найден.";
+        }
+        else if (return_status) {
             msg[0].msg = "Несоответствие клавиатурного почерка. Попробуйте снова.";
         } else {
             msg[0].msg = "Клавиатурный почерк сверен.";
@@ -254,7 +257,5 @@ int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc, const char **ar
 int pam_sm_setcred (pam_handle_t *pamh, int flags,
                 int argc, const char **argv)
 {
-    int retval;
-    retval = PAM_SUCCESS;
-    return retval;
+    return PAM_SUCCESS;
 }

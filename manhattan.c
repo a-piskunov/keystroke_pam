@@ -107,7 +107,7 @@ void fit_classifier(double *fit_vectors, int fit_vectors_num,
     }
     if (*norm_score < 0) {
 //        printf("calc norm score\n");
-        double *fit_scores = calloc(features_number, sizeof(*fit_scores));
+        double *fit_scores = calloc(fit_vectors_num, sizeof(*fit_scores));
         double scores_mean = 0;
 //        printf("scores_mean: ");
         for (int i=0; i<fit_vectors_num; i++) {

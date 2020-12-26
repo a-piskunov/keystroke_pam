@@ -86,9 +86,7 @@ int main(int argc, char *argv[])
     syslog(LOG_AUTH|LOG_ERR, "helper: to pam");
     struct pollfd stdin_poll = { .fd = STDIN_FILENO
             , .events = POLLIN | POLLRDBAND | POLLRDNORM | POLLPRI };
-
     int ev_offset = 0;
-
     bool entering_password = true;
     while (entering_password) {
         syslog(LOG_AUTH|LOG_ERR, "while");
@@ -153,7 +151,6 @@ int main(int argc, char *argv[])
     }
     long int last_press_time_sec = 0;
     long int last_press_time_usec = 0;
-
     double *time_features = malloc(num_actions * sizeof(double));
     int *correct_keycodes = malloc(num_actions * sizeof(int));
     int keycodes_num = 0;
@@ -197,21 +194,28 @@ int main(int argc, char *argv[])
             last_press_time_usec = array_of_actions[i].time.tv_usec;
         }
     }
-
     /* read from file */
     char user_file_path[100] = "/etc/keystroke-pam/";
     strcat(user_file_path, user);
     FILE *f = fopen(user_file_path,"r");
     if ( !f ) {
         syslog (LOG_AUTH|LOG_ERR, "Error: Unable to open input file.\n");
-        return PAM_SYSTEM_ERR;
+        int res = PAM_USER_UNKNOWN;
+        if (write(STDOUT_FILENO, &res, sizeof(int)) == -1) {
+            syslog(LOG_AUTH|LOG_ERR, "helper: cannot send message from helper");
+        }
+        return res;
     }
     syslog (LOG_AUTH|LOG_ERR, "open file. %s", user_file_path);
     int rows, cols;
     double norm_score;
     if ( fscanf(f,"%lf%d%d", &norm_score, &rows, &cols) != 3 ) {
         syslog (LOG_AUTH|LOG_ERR, "Error: wrong file format.\n");
-        return PAM_SYSTEM_ERR;
+        int res = PAM_SYSTEM_ERR;
+        if (write(STDOUT_FILENO, &res, sizeof(int)) == -1) {
+            syslog(LOG_AUTH|LOG_ERR, "helper: cannot send message from helper");
+        }
+        return res;
     }
     syslog (LOG_AUTH|LOG_ERR, "open file. %s", user_file_path);
     if (cols != features_num) {
