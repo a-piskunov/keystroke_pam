@@ -4,23 +4,17 @@
 #include <syslog.h>
 #include <unistd.h>
 #include <sys/types.h>
-#include <sys/stat.h>
 #include <pwd.h>
 #include <shadow.h>
-#include <signal.h>
-#include <time.h>
 #include <errno.h>
 #include <linux/input.h>
-#include <string.h>
 #include <fcntl.h>
-#include <errno.h>
 #include <poll.h>
 #include <stdbool.h>
-#include <time.h>
 
 #include <security/_pam_types.h>
-#include <security/_pam_macros.h>
 #include "manhattan.h"
+#define MAX_BUFF 300
 
 static const char *const evval[3] = {
         "RELEASED",
@@ -48,7 +42,7 @@ int main(int argc, char *argv[])
 {
     int retval = PAM_AUTH_ERR;
     char *user;
-    struct input_event ev[300];
+    struct input_event ev[MAX_BUFF];
     ssize_t n;
     int fd;
     char keyboard_path[100];
@@ -89,7 +83,6 @@ int main(int argc, char *argv[])
     int ev_offset = 0;
     bool entering_password = true;
     while (entering_password) {
-        syslog(LOG_AUTH|LOG_ERR, "while");
         /* check password receiving from pam */
         if (poll(&stdin_poll, 1, 0) == 1) {
             int finish_flag;
@@ -112,7 +105,8 @@ int main(int argc, char *argv[])
         if(rv == -1)
             syslog(LOG_WARNING, "helper: select error"); /* an error accured */
         else if(rv > 0) { /* there was data to read */
-            n = read(fd, ev + ev_offset, sizeof(ev));
+            n = read(fd, ev + ev_offset, sizeof(struct input_event)*(MAX_BUFF - ev_offset));
+
             if (n == (ssize_t) -1) {
 //            if (errno == EINTR)
 //                continue;
@@ -129,7 +123,7 @@ int main(int argc, char *argv[])
             }
         }
     }
-    struct input_event array_of_actions[100];
+    struct input_event array_of_actions[MAX_BUFF];
     int num_actions = 0;
     int i = 1;
     /* check enter */
@@ -194,6 +188,14 @@ int main(int argc, char *argv[])
             last_press_time_usec = array_of_actions[i].time.tv_usec;
         }
     }
+    if (debug) {
+        char str[500];
+        int i=0;
+        int index = 0;
+        for (i=0; i<features_num; i++)
+            index += sprintf(&str[index], "%5.2f ", time_features[i]);
+        syslog (LOG_AUTH|LOG_INFO, "time features: %s", str);
+    }
     /* read from file */
     char user_file_path[100] = "/etc/keystroke-pam/";
     strcat(user_file_path, user);
@@ -225,6 +227,7 @@ int main(int argc, char *argv[])
             syslog(LOG_AUTH|LOG_ERR, "helper: cannot send message from helper");
             retval = PAM_AUTH_ERR;
         }
+        syslog(LOG_AUTH | LOG_INFO, "user %s, auth result: PAM_AUTH_ERR", user);
         return res;
     }
 
@@ -236,9 +239,9 @@ int main(int argc, char *argv[])
     passwords_features = malloc(rows * cols * sizeof(double));
     passwords_features_copy = malloc(rows * cols * sizeof(double));
     for (int i = 0; i < rows; i++) {
-        syslog (LOG_AUTH|LOG_INFO, "read row %d\n", i);
+//        syslog (LOG_AUTH|LOG_INFO, "read row %d\n", i);
         for (int j = 0; j < cols; j++) {
-            syslog (LOG_AUTH|LOG_INFO, "read feature %d\n", j);
+//            syslog (LOG_AUTH|LOG_INFO, "read feature %d\n", j);
             double feature;
             if (fscanf(f,"%lf", &feature) == EOF) {
                 find_EOF = true;
@@ -296,6 +299,7 @@ int main(int argc, char *argv[])
         rename(user_file_path_tmp, user_file_path);
         /* report to pam */
         int res = PAM_SUCCESS;
+        syslog(LOG_AUTH | LOG_INFO, "user %s, auth result: PAM_SUCCESS", user);
         if (write(STDOUT_FILENO, &res, sizeof(int)) == -1) {
             syslog(LOG_AUTH|LOG_ERR, "helper: cannot send message from helper");
             retval = PAM_AUTH_ERR;
@@ -305,6 +309,7 @@ int main(int argc, char *argv[])
         free(time_features_copy);
         /* report to pam */
         int res = PAM_AUTH_ERR;
+        syslog(LOG_AUTH | LOG_INFO, "user %s, auth result: PAM_AUTH_ERR", user);
         if (write(STDOUT_FILENO, &res, sizeof(int)) == -1) {
             syslog(LOG_AUTH|LOG_ERR, "helper: cannot send message from helper");
             retval = PAM_AUTH_ERR;
@@ -312,3 +317,4 @@ int main(int argc, char *argv[])
         return res;
     }
 }
+

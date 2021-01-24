@@ -3,4 +3,4 @@ project(keystroke_pam C)
 
 set(CMAKE_C_STANDARD 99)
 
-add_executable(keystroke_pam keystroke_pam.c binary_helper.c)
+add_executable(keystroke_pam pam_keystroke.c keystroke_helper.c)
