@@ -1,28 +1,17 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <stdarg.h>
 #include <string.h>
 #include <unistd.h>
-#include <fcntl.h>
-#include <ctype.h>
 #include <sys/types.h>
-#include <sys/stat.h>
 #include <syslog.h>
 #include <errno.h>
-
-#include <sys/types.h>
 #include <sys/wait.h>
-
-#define PAM_DEBUG 1
 #define BINARY_HELPER "/usr/sbin/keystroke_helper"
 
 #include <security/_pam_macros.h>
 #include <security/pam_modules.h>
 #include <security/pam_ext.h>
-#include <security/pam_modutil.h>
-// #include "support.h"
 
-// # define WEXITSTATUS(stat_val) ((unsigned int) (stat_val) >> 8)
 
 #define AUTH_RETURN						\
 do {									\

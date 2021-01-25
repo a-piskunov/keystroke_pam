@@ -4,7 +4,6 @@
 #include <syslog.h>
 #include <unistd.h>
 #include <sys/types.h>
-#include <pwd.h>
 #include <shadow.h>
 #include <errno.h>
 #include <linux/input.h>
@@ -22,25 +21,8 @@ static const char *const evval[3] = {
         "REPEATED"
 };
 
-char *
-getuidname(uid_t uid)
-{
-    struct passwd *pw;
-    static char username[256];
-
-    pw = getpwuid(uid);
-    if (pw == NULL)
-        return NULL;
-
-    strncpy(username, pw->pw_name, sizeof(username));
-    username[sizeof(username) - 1] = '\0';
-
-    return username;
-}
-
 int main(int argc, char *argv[])
 {
-    int retval = PAM_AUTH_ERR;
     char *user;
     struct input_event ev[MAX_BUFF];
     ssize_t n;
@@ -50,6 +32,7 @@ int main(int argc, char *argv[])
     int debug;
 
     user=argv[1];
+
 
     score = atof(argv[2]);
     strncpy(keyboard_path, argv[3], strlen(argv[3]) + 1);
@@ -75,20 +58,18 @@ int main(int argc, char *argv[])
     int helper_message = 0;
     if (write(STDOUT_FILENO, &helper_message, sizeof(int)) == -1) {
         syslog(LOG_AUTH|LOG_ERR, "helper: cannot send message from helper");
-        retval = PAM_AUTH_ERR;
     }
     syslog(LOG_AUTH|LOG_ERR, "helper: to pam");
     struct pollfd stdin_poll = { .fd = STDIN_FILENO
             , .events = POLLIN | POLLRDBAND | POLLRDNORM | POLLPRI };
     int ev_offset = 0;
     bool entering_password = true;
-    while (entering_password) {
+    while ((entering_password)&&(ev_offset < MAX_BUFF - 1)) {
         /* check password receiving from pam */
         if (poll(&stdin_poll, 1, 0) == 1) {
             int finish_flag;
             if (read(STDIN_FILENO, &finish_flag, sizeof(int)) == -1) {
                 syslog(LOG_AUTH|LOG_ERR, "helper: cannot send message from helper");
-                retval = PAM_AUTH_ERR;
             }
             syslog(LOG_AUTH|LOG_ERR, "helper: finish password");
             entering_password = false;
@@ -105,20 +86,13 @@ int main(int argc, char *argv[])
         if(rv == -1)
             syslog(LOG_WARNING, "helper: select error"); /* an error accured */
         else if(rv > 0) { /* there was data to read */
-            n = read(fd, ev + ev_offset, sizeof(struct input_event)*(MAX_BUFF - ev_offset));
-
+            n = read(fd, ev + ev_offset, sizeof(struct input_event)*(MAX_BUFF - 1 - ev_offset));
             if (n == (ssize_t) -1) {
-//            if (errno == EINTR)
-//                continue;
-//            else
-//                break;
+                if (errno == EINTR)
+                    continue;
                 syslog(LOG_WARNING, "-1 while reading events");
                 return PAM_SYSTEM_ERR;
             } else {
-//        if (n != sizeof ev) {
-//            errno = EIO;
-//          break;
-//        }
                 ev_offset += n / sizeof(struct input_event);
             }
         }
@@ -225,7 +199,6 @@ int main(int argc, char *argv[])
         int res = PAM_AUTH_ERR;
         if (write(STDOUT_FILENO, &res, sizeof(int)) == -1) {
             syslog(LOG_AUTH|LOG_ERR, "helper: cannot send message from helper");
-            retval = PAM_AUTH_ERR;
         }
         syslog(LOG_AUTH | LOG_INFO, "user %s, auth result: PAM_AUTH_ERR", user);
         return res;
@@ -302,7 +275,6 @@ int main(int argc, char *argv[])
         syslog(LOG_AUTH | LOG_INFO, "user %s, auth result: PAM_SUCCESS", user);
         if (write(STDOUT_FILENO, &res, sizeof(int)) == -1) {
             syslog(LOG_AUTH|LOG_ERR, "helper: cannot send message from helper");
-            retval = PAM_AUTH_ERR;
         }
         return res;
     } else {
@@ -312,7 +284,6 @@ int main(int argc, char *argv[])
         syslog(LOG_AUTH | LOG_INFO, "user %s, auth result: PAM_AUTH_ERR", user);
         if (write(STDOUT_FILENO, &res, sizeof(int)) == -1) {
             syslog(LOG_AUTH|LOG_ERR, "helper: cannot send message from helper");
-            retval = PAM_AUTH_ERR;
         }
         return res;
     }
